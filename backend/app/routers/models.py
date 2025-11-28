@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..dependencies import get_current_user
@@ -50,9 +50,9 @@ async def create_model(
     return model
 
 
-@router.get("/{organization_id}", response_model=list[ModelRead])
+@router.get("/", response_model=list[ModelRead])
 async def list_models(
-    organization_id: int,
+    organization_id: int = Query(..., description="Organization to list models for"),
     session: AsyncSession = Depends(get_session),
     current_user=Depends(get_current_user),
 ):
@@ -64,5 +64,36 @@ async def list_models(
     if not membership.scalars().first():
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of workspace")
 
-    result = await session.execute(select(Model).where(Model.organization_id == organization_id))
-    return result.scalars().all()
+    result = await session.execute(
+        select(Model)
+        .where(Model.organization_id == organization_id)
+        .order_by(Model.created_at.desc())
+    )
+    models = result.scalars().unique().all()
+    for model in models:
+        await session.refresh(model, attribute_names=["fields"])
+    return models
+
+
+@router.get("/{model_id}", response_model=ModelRead)
+async def get_model(
+    model_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user=Depends(get_current_user),
+):
+    model_result = await session.execute(select(Model).where(Model.id == model_id))
+    model = model_result.scalars().first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+
+    membership = await session.execute(
+        select(Membership).where(
+            Membership.user_id == current_user.id,
+            Membership.organization_id == model.organization_id,
+        )
+    )
+    if not membership.scalars().first():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of workspace")
+
+    await session.refresh(model, attribute_names=["fields"])
+    return model

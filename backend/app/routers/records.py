@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime, date
+from typing import Any
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, asc, desc
+from sqlalchemy.sql import Select
 from ..dependencies import get_current_user
 from ..db import get_session
 from ..models import Record, Model, Field, Membership
 from ..schemas import RecordCreate, RecordRead
 from ..core_config import settings
 
-router = APIRouter(prefix="/records", tags=["records"])
+router = APIRouter(tags=["records"])
 
 
 async def ensure_membership(session: AsyncSession, user_id: int, organization_id: int):
@@ -20,19 +23,104 @@ async def ensure_membership(session: AsyncSession, user_id: int, organization_id
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of workspace")
 
 
-@router.post("/{model_id}", response_model=RecordRead)
+def _coerce_date(value: Any) -> date:
+    if isinstance(value, (datetime, date)):
+        return value.date() if isinstance(value, datetime) else value
+    if isinstance(value, str):
+        return datetime.fromisoformat(value).date()
+    raise ValueError("Invalid date")
+
+
+def _validate_field(field: Field, value: Any) -> str | None:
+    if value is None:
+        return "Field cannot be null"
+
+    try:
+        if field.field_type in {"string", "longtext"}:
+            if not isinstance(value, str):
+                return "Must be a string"
+        elif field.field_type == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return "Must be a number"
+        elif field.field_type == "boolean":
+            if not isinstance(value, bool):
+                return "Must be a boolean"
+        elif field.field_type == "date":
+            _coerce_date(value)
+        elif field.field_type == "enum":
+            options = []
+            if isinstance(field.options, dict):
+                options = field.options.get("values") or field.options.get("options") or []
+            if value not in options:
+                return "Value not permitted"
+        elif field.field_type == "relation":
+            if not isinstance(value, int):
+                return "Must reference related record id"
+        else:
+            return "Unsupported field type"
+    except Exception:
+        return "Invalid value"
+    return None
+
+
+async def validate_record_payload(session: AsyncSession, model: Model, data: dict) -> None:
+    await session.refresh(model, attribute_names=["fields"])
+    errors: list[dict[str, str]] = []
+    data = data or {}
+
+    for field in model.fields:
+        if field.required and field.key not in data:
+            errors.append({"field": field.key, "error": "Field is required"})
+            continue
+
+        if field.key not in data:
+            continue
+
+        error = _validate_field(field, data.get(field.key))
+        if error:
+            errors.append({"field": field.key, "error": error})
+
+    if errors:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=errors)
+
+
+async def get_model_with_membership(
+    session: AsyncSession, model_id: int, user_id: int
+) -> Model:
+    model_result = await session.execute(select(Model).where(Model.id == model_id))
+    model = model_result.scalars().first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+    await ensure_membership(session, user_id, model.organization_id)
+    return model
+
+
+def _apply_sorting(query: Select, sort_by: str | None, sort_order: str) -> Select:
+    if not sort_by or sort_by in {"created_at", "updated_at"}:
+        column = Record.created_at if not sort_by or sort_by == "created_at" else Record.updated_at
+        return query.order_by(asc(column) if sort_order == "asc" else desc(column))
+
+    json_field = Record.data[sort_by].astext
+    sorter = asc(json_field) if sort_order == "asc" else desc(json_field)
+    return query.order_by(sorter)
+
+
+def _apply_filters(query: Select, filter_key: str | None, filter_value: str | None) -> Select:
+    if filter_key and filter_value is not None:
+        query = query.where(Record.data[filter_key].astext == str(filter_value))
+    return query
+
+
+@router.post("/models/{model_id}/records", response_model=RecordRead)
 async def create_record(
     model_id: int,
     payload: RecordCreate,
     session: AsyncSession = Depends(get_session),
     current_user=Depends(get_current_user),
 ):
-    model_result = await session.execute(select(Model).where(Model.id == model_id))
-    model = model_result.scalars().first()
-    if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+    model = await get_model_with_membership(session, model_id, current_user.id)
 
-    await ensure_membership(session, current_user.id, model.organization_id)
+    await validate_record_payload(session, model, payload.data)
 
     count_result = await session.execute(select(func.count()).select_from(Record).where(Record.model_id == model_id))
     total_records = count_result.scalar_one()
@@ -46,34 +134,61 @@ async def create_record(
     return record
 
 
-@router.get("/{model_id}", response_model=list[RecordRead])
+@router.get("/models/{model_id}/records", response_model=list[RecordRead])
 async def list_records(
     model_id: int,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, gt=0, le=100),
+    sort_by: str | None = Query(None, description="created_at, updated_at or field key"),
+    sort_order: str = Query("asc", pattern="^(asc|desc)$"),
+    filter_key: str | None = Query(None),
+    filter_value: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
     current_user=Depends(get_current_user),
 ):
-    model_result = await session.execute(select(Model).where(Model.id == model_id))
-    model = model_result.scalars().first()
-    if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
-    await ensure_membership(session, current_user.id, model.organization_id)
-    result = await session.execute(select(Record).where(Record.model_id == model_id))
+    await get_model_with_membership(session, model_id, current_user.id)
+
+    query: Select = select(Record).where(Record.model_id == model_id)
+    query = _apply_filters(query, filter_key, filter_value)
+    query = _apply_sorting(query, sort_by, sort_order)
+    query = query.offset(skip).limit(limit)
+
+    result = await session.execute(query)
     return result.scalars().all()
 
 
-@router.delete("/{record_id}")
-async def delete_record(
+@router.get("/records/{record_id}", response_model=RecordRead)
+async def view_record(
     record_id: int,
     session: AsyncSession = Depends(get_session),
     current_user=Depends(get_current_user),
 ):
-    record_result = await session.execute(
-        select(Record).join(Model).where(Record.id == record_id, Model.id == Record.model_id)
-    )
+    record_result = await session.execute(select(Record).where(Record.id == record_id))
     record = record_result.scalars().first()
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
-    await ensure_membership(session, current_user.id, record.model.organization_id)
-    await session.delete(record)
+
+    model = await get_model_with_membership(session, record.model_id, current_user.id)
+    await validate_record_payload(session, model, record.data)
+    return record
+
+
+@router.put("/records/{record_id}", response_model=RecordRead)
+async def update_record(
+    record_id: int,
+    payload: RecordCreate,
+    session: AsyncSession = Depends(get_session),
+    current_user=Depends(get_current_user),
+):
+    record_result = await session.execute(select(Record).where(Record.id == record_id))
+    record = record_result.scalars().first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    model = await get_model_with_membership(session, record.model_id, current_user.id)
+    await validate_record_payload(session, model, payload.data)
+
+    record.data = payload.data
     await session.commit()
-    return {"status": "deleted"}
+    await session.refresh(record)
+    return record
