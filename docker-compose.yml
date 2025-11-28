@@ -16,6 +16,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/atlas
       JWT_SECRET: dev-secret
       FREE_RECORD_LIMIT: 500
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001
     depends_on:
       - db
     ports:

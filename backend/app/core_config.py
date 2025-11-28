@@ -9,5 +9,6 @@ class Settings(BaseModel):
     jwt_algorithm: str = "HS256"
     access_token_expires_minutes: int = 60 * 24
     free_record_limit: int = int(os.getenv("FREE_RECORD_LIMIT", "500"))
+    cors_origins: list[str] = Field(default_factory=lambda: os.getenv("CORS_ORIGINS", "http://localhost:3001,http://localhost:3000").split(","))
 
 settings = Settings()
