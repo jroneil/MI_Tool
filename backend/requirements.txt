@@ -1,0 +1,9 @@
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+SQLAlchemy==2.0.29
+asyncpg==0.29.0
+passlib[bcrypt]==1.7.4
+python-jose==3.3.0
+pydantic[email]==2.7.1
+types-python-jose==3.3.4.8
+python-multipart==0.0.9

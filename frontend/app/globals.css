@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0b1021;
+  --foreground: #f8fafc;
+}
+
+body {
+  background: radial-gradient(circle at 20% 20%, rgba(99,102,241,0.12), transparent 25%),
+              radial-gradient(circle at 80% 0%, rgba(14,165,233,0.14), transparent 26%),
+              #0b1021;
+  color: var(--foreground);
+  min-height: 100vh;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.25);
+  border-radius: 16px;
+}

@@ -1,0 +1,49 @@
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS organizations (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS memberships (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+    role VARCHAR(50) DEFAULT 'member',
+    CONSTRAINT uq_membership UNIQUE (user_id, organization_id)
+);
+
+CREATE TABLE IF NOT EXISTS models (
+    id SERIAL PRIMARY KEY,
+    organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    slug VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_model_slug UNIQUE (organization_id, slug)
+);
+
+CREATE TABLE IF NOT EXISTS fields (
+    id SERIAL PRIMARY KEY,
+    model_id INTEGER REFERENCES models(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    key VARCHAR(255) NOT NULL,
+    field_type VARCHAR(50) NOT NULL,
+    required BOOLEAN DEFAULT FALSE,
+    options JSONB
+);
+
+CREATE TABLE IF NOT EXISTS records (
+    id SERIAL PRIMARY KEY,
+    model_id INTEGER REFERENCES models(id) ON DELETE CASCADE,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    data JSONB NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
