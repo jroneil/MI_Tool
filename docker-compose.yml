@@ -1,0 +1,32 @@
+version: '3.9'
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: atlas
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/atlas
+      JWT_SECRET: dev-secret
+      FREE_RECORD_LIMIT: 500
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+  frontend:
+    build: ./frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000/api
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+volumes:
+  pgdata:
