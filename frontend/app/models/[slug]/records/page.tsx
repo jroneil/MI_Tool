@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
+import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-store'
 
 interface ModelField {
   id: number
@@ -118,7 +119,8 @@ export default function RecordsPage() {
   const slug = params?.slug
   const [organizationId, setOrganizationId] = useState<number>(() => {
     const fromQuery = Number(searchParams.get('org'))
-    return Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery : 1
+    if (Number.isFinite(fromQuery) && fromQuery > 0) return fromQuery
+    return getWorkspaceId() || 1
   })
 
   const [model, setModel] = useState<ModelDefinition | null>(null)
@@ -139,6 +141,12 @@ export default function RecordsPage() {
   const [hasMore, setHasMore] = useState(false)
   const [usageEstimate, setUsageEstimate] = useState(0)
   const planLimit = 500
+
+  const updateWorkspace = (value: number) => {
+    const normalized = Number.isFinite(value) && value > 0 ? value : 1
+    setOrganizationId(normalized)
+    storeWorkspaceId(normalized)
+  }
 
   const displayRecords = useMemo(() => {
     if (!search.trim()) return records
@@ -198,6 +206,24 @@ export default function RecordsPage() {
     fetchModel()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, organizationId])
+
+  useEffect(() => {
+    const fromQuery = Number(searchParams.get('org'))
+    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== organizationId) {
+      updateWorkspace(fromQuery)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  useEffect(() => {
+    const unsubscribe = subscribe((id) => {
+      if (id && id !== organizationId) {
+        setOrganizationId(id)
+      }
+    })
+    return unsubscribe
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId])
 
   useEffect(() => {
     if (model?.id) {
@@ -261,13 +287,13 @@ export default function RecordsPage() {
           <p className="text-slate-300">Search, filter, and create data directly from your auto-generated model.</p>
         </div>
         <div className="flex items-center gap-3">
-          <input
-            type="number"
-            value={organizationId}
-            onChange={(e) => setOrganizationId(Number(e.target.value))}
-            className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
-            placeholder="Org ID"
-          />
+            <input
+              type="number"
+              value={organizationId}
+              onChange={(e) => updateWorkspace(Number(e.target.value))}
+              className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
+              placeholder="Org ID"
+            />
           <button
             onClick={() => model && fetchRecords(model.id, { resetPage: true })}
             className="bg-brand-500 px-4 py-2 rounded-lg text-white"
@@ -282,7 +308,7 @@ export default function RecordsPage() {
           <div className="space-y-1">
             <p className="text-sm text-slate-400">{model?.fields.length || 0} fields</p>
             <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Link href="/models/list" className="underline hover:text-white">Back to models</Link>
+              <Link href={`/models/list?org=${organizationId}`} className="underline hover:text-white">Back to models</Link>
               {model?.slug && <span className="bg-slate-900 border border-slate-800 rounded-full px-2 py-1">{model.slug}</span>}
             </div>
           </div>
