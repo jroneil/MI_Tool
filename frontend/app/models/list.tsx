@@ -74,7 +74,7 @@ export default function ModelsListPage() {
         setOrganizationId(id)
       }
     })
-    return unsubscribe
+    return typeof unsubscribe === 'function' ? unsubscribe : () => {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId])
 

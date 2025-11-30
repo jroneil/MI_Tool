@@ -221,7 +221,11 @@ export default function RecordsPage() {
         setOrganizationId(id)
       }
     })
-    return unsubscribe
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId])
 
