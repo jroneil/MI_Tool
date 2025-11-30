@@ -2,7 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
+import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-store'
 
 interface ModelField {
   id: number
@@ -21,11 +23,18 @@ interface ModelItem {
 }
 
 export default function ModelsListPage() {
-  const [organizationId, setOrganizationId] = useState<number>(1)
+  const searchParams = useSearchParams()
+  const [organizationId, setOrganizationId] = useState<number>(() => getWorkspaceId() || 1)
   const [models, setModels] = useState<ModelItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('')
+
+  const updateWorkspace = (value: number) => {
+    const normalized = Number.isFinite(value) && value > 0 ? value : 1
+    setOrganizationId(normalized)
+    storeWorkspaceId(normalized)
+  }
 
   const filteredModels = useMemo(() => {
     if (!filter.trim()) return models
@@ -36,6 +45,7 @@ export default function ModelsListPage() {
   }, [filter, models])
 
   const fetchModels = async () => {
+    if (!organizationId || organizationId <= 0) return
     setLoading(true)
     setError('')
     try {
@@ -49,6 +59,30 @@ export default function ModelsListPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    const fromQuery = Number(searchParams.get('org'))
+    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== organizationId) {
+      updateWorkspace(fromQuery)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  useEffect(() => {
+    const unsubscribe = subscribe((id) => {
+      if (id && id !== organizationId) {
+        setOrganizationId(id)
+      }
+    })
+    return unsubscribe
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationId])
+
+  useEffect(() => {
+    if (organizationId > 0) {
+      storeWorkspaceId(organizationId)
+    }
+  }, [organizationId])
 
   useEffect(() => {
     fetchModels()
@@ -67,7 +101,7 @@ export default function ModelsListPage() {
           <input
             type="number"
             value={organizationId}
-            onChange={(e) => setOrganizationId(Number(e.target.value))}
+            onChange={(e) => updateWorkspace(Number(e.target.value))}
             className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
             placeholder="Org ID"
           />
