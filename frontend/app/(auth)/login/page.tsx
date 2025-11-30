@@ -1,23 +1,33 @@
 'use client'
 import { FormEvent, useState } from 'react'
 import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
+import { useRouter } from 'next/navigation'
+import { AxiosError } from 'axios'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const { setToken } = useAuth()
+  const router = useRouter()
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setMessage('')
+    setError('')
     try {
       const params = new URLSearchParams()
       params.append('username', email)
       params.append('password', password)
       const res = await api.post('/auth/token', params)
-      setMessage('Logged in. Token: ' + res.data.access_token)
+      setToken(res.data.access_token)
+      setMessage('Logged in successfully')
+      router.push('/workspaces')
     } catch (err) {
-      setMessage('Login failed')
+      const message = (err as AxiosError<{ detail?: string }>)?.response?.data?.detail || 'Login failed'
+      setError(message)
     }
   }
 
@@ -35,6 +45,7 @@ export default function LoginPage() {
         </label>
         <button className="bg-brand-500 px-4 py-2 rounded text-white">Login</button>
         {message && <p className="text-sm text-slate-300">{message}</p>}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </form>
     </div>
   )

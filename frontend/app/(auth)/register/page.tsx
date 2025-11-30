@@ -1,20 +1,35 @@
 'use client'
 import { FormEvent, useState } from 'react'
 import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth-context'
+import { useRouter } from 'next/navigation'
+import { AxiosError } from 'axios'
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const { setToken } = useAuth()
+  const router = useRouter()
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setMessage('')
+    setError('')
     try {
       const res = await api.post('/auth/register', { email, password })
       setMessage('Registered ' + res.data.email)
+
+      const params = new URLSearchParams()
+      params.append('username', email)
+      params.append('password', password)
+      const tokenRes = await api.post('/auth/token', params)
+      setToken(tokenRes.data.access_token)
+      router.push('/workspaces')
     } catch (err) {
-      setMessage('Registration failed')
+      const message = (err as AxiosError<{ detail?: string }>)?.response?.data?.detail || 'Registration failed'
+      setError(message)
     }
   }
 
@@ -32,6 +47,7 @@ export default function RegisterPage() {
         </label>
         <button className="bg-brand-500 px-4 py-2 rounded text-white">Register</button>
         {message && <p className="text-sm text-slate-300">{message}</p>}
+        {error && <p className="text-sm text-rose-400">{error}</p>}
       </form>
     </div>
   )
