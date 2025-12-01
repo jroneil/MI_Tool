@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '@/lib/api'
 import { getWorkspaceId, storeWorkspaceId } from '@/lib/workspace-store'
 
@@ -21,7 +21,72 @@ export default function ModelsPage() {
   const [fields, setFields] = useState<FieldRow[]>([
     { name: 'Title', slug: 'title', data_type: 'string', is_required: true, is_unique: false }
   ])
-  const [message, setMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+  const [serverError, setServerError] = useState('')
+
+  const normalizeSlug = (value: string) =>
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z0-9-_]/g, '')
+      .replace(/[-_]{2,}/g, '-')
+      .replace(/^[-_]+|[-_]+$/g, '')
+
+  const validate = () => {
+    const errors: {
+      name: string
+      slug: string
+      workspaceId: string
+      fields: { name: string; slug: string }[]
+    } = { name: '', slug: '', workspaceId: '', fields: fields.map(() => ({ name: '', slug: '' })) }
+
+    if (!name.trim()) errors.name = 'Name is required'
+    if (!slug.trim()) errors.slug = 'Slug is required'
+    if (!workspaceId) errors.workspaceId = 'Workspace id is required'
+
+    const nameCounts: Record<string, number> = {}
+    const slugCounts: Record<string, number> = {}
+
+    fields.forEach((field) => {
+      const normalizedName = field.name.trim().toLowerCase()
+      const normalizedSlug = field.slug.trim().toLowerCase()
+      if (normalizedName) nameCounts[normalizedName] = (nameCounts[normalizedName] || 0) + 1
+      if (normalizedSlug) slugCounts[normalizedSlug] = (slugCounts[normalizedSlug] || 0) + 1
+    })
+
+    fields.forEach((field, index) => {
+      const fieldName = field.name.trim()
+      const fieldSlug = field.slug.trim()
+
+      if (!fieldName) errors.fields[index].name = 'Field name is required'
+      if (!fieldSlug) errors.fields[index].slug = 'Field slug is required'
+
+      if (fieldName && nameCounts[fieldName.toLowerCase()] > 1)
+        errors.fields[index].name = 'Duplicate field name'
+
+      if (fieldSlug && slugCounts[fieldSlug.toLowerCase()] > 1)
+        errors.fields[index].slug = 'Duplicate field slug'
+    })
+
+    return errors
+  }
+
+  const validationErrors = useMemo(validate, [name, slug, workspaceId, fields])
+
+  const isFormValid = useMemo(
+    () =>
+      !validationErrors.name &&
+      !validationErrors.slug &&
+      !validationErrors.workspaceId &&
+      validationErrors.fields.every((field) => !field.name && !field.slug),
+    [validationErrors]
+  )
+
+  useEffect(() => {
+    if (successMessage) setSuccessMessage('')
+    if (serverError) setServerError('')
+  }, [name, slug, workspaceId, fields])
 
   const addField = () =>
     setFields([
@@ -30,7 +95,18 @@ export default function ModelsPage() {
     ])
 
   const submit = async () => {
-    setMessage('')
+    const errors = validate()
+    if (
+      errors.name ||
+      errors.slug ||
+      errors.workspaceId ||
+      errors.fields.some((field) => field.name || field.slug)
+    ) {
+      return
+    }
+
+    setSuccessMessage('')
+    setServerError('')
     try {
       const normalizedFields = fields.map((field, index) => ({
         name: field.name,
@@ -51,10 +127,10 @@ export default function ModelsPage() {
         slug,
         fields: normalizedFields
       })
-      setMessage('Model created: ' + res.data.name)
+      setSuccessMessage('Model created: ' + res.data.name)
       storeWorkspaceId(workspaceId)
     } catch (err) {
-      setMessage('Failed to create model')
+      setServerError('Failed to create model')
     }
   }
 
@@ -65,16 +141,34 @@ export default function ModelsPage() {
           <p className="text-sm uppercase text-slate-400">Model builder</p>
           <h1 className="text-3xl font-semibold">Define your entity</h1>
         </div>
-        <button onClick={submit} className="bg-brand-500 px-4 py-2 rounded-lg text-white">Generate CRUD</button>
+        <button
+          onClick={submit}
+          disabled={!isFormValid}
+          className={`px-4 py-2 rounded-lg text-white ${
+            isFormValid ? 'bg-brand-500' : 'bg-slate-700 cursor-not-allowed'
+          }`}
+        >
+          Generate CRUD
+        </button>
       </div>
       <div className="grid md:grid-cols-3 gap-4">
         <label className="grid gap-1">
           <span>Name</span>
-          <input className="bg-slate-900 p-2 rounded" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            className="bg-slate-900 p-2 rounded"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          {validationErrors.name && <p className="text-xs text-red-400">{validationErrors.name}</p>}
         </label>
         <label className="grid gap-1">
           <span>Slug</span>
-          <input className="bg-slate-900 p-2 rounded" value={slug} onChange={(e) => setSlug(e.target.value)} />
+          <input
+            className="bg-slate-900 p-2 rounded"
+            value={slug}
+            onChange={(e) => setSlug(normalizeSlug(e.target.value))}
+          />
+          {validationErrors.slug && <p className="text-xs text-red-400">{validationErrors.slug}</p>}
         </label>
         <label className="grid gap-1">
           <span>Workspace id</span>
@@ -83,6 +177,9 @@ export default function ModelsPage() {
             value={workspaceId}
             onChange={(e) => setWorkspaceId(Number(e.target.value))}
           />
+          {validationErrors.workspaceId && (
+            <p className="text-xs text-red-400">{validationErrors.workspaceId}</p>
+          )}
         </label>
       </div>
       <div className="space-y-3">
@@ -102,7 +199,7 @@ export default function ModelsPage() {
               className="bg-slate-900 p-2 rounded"
               value={field.slug}
               onChange={(e) =>
-                setFields(fields.map((f, i) => (i === idx ? { ...f, slug: e.target.value } : f)))
+                setFields(fields.map((f, i) => (i === idx ? { ...f, slug: normalizeSlug(e.target.value) } : f)))
               }
             />
             <select
@@ -146,11 +243,16 @@ export default function ModelsPage() {
                 }
               />
             )}
+            <div className="col-span-2 md:col-span-5 grid grid-cols-2 gap-2 text-xs text-red-400">
+              <span>{validationErrors.fields[idx]?.name}</span>
+              <span>{validationErrors.fields[idx]?.slug}</span>
+            </div>
           </div>
         ))}
         <button onClick={addField} className="border border-slate-800 px-3 py-2 rounded">Add field</button>
       </div>
-      {message && <p className="text-sm text-slate-300">{message}</p>}
+      {successMessage && <p className="text-sm text-green-400">{successMessage}</p>}
+      {serverError && <p className="text-sm text-red-400">{serverError}</p>}
     </div>
   )
 }
