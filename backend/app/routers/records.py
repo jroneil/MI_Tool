@@ -204,3 +204,20 @@ async def update_record(
     await session.commit()
     await session.refresh(record)
     return record
+
+
+@router.delete("/records/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_record(
+    record_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user=Depends(get_current_user),
+):
+    record_result = await session.execute(select(Record).where(Record.id == record_id))
+    record = record_result.scalars().first()
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
+
+    await ensure_membership(session, current_user.id, record.workspace_id)
+
+    await session.delete(record)
+    await session.commit()

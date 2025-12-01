@@ -70,12 +70,39 @@ class FieldRead(FieldCreate):
         from_attributes = True
 
 
+class FieldUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    data_type: Optional[str] = None
+    is_required: Optional[bool] = None
+    is_unique: Optional[bool] = None
+    position: Optional[int] = None
+    config: Optional[dict] = None
+
+    @field_validator("data_type")
+    @classmethod
+    def validate_type(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        allowed = {"string", "text", "number", "boolean", "date", "datetime", "enum", "relation"}
+        if v not in allowed:
+            raise ValueError("Unsupported field type")
+        return v
+
+
 class ModelCreate(BaseModel):
     workspace_id: int
     name: str
     slug: str
     description: Optional[str] = None
     fields: List[FieldCreate]
+
+
+class ModelUpdate(BaseModel):
+    name: Optional[str] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    fields: Optional[List[FieldUpdate]] = None
 
 
 class ModelRead(BaseModel):
