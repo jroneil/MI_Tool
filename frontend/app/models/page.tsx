@@ -1,37 +1,58 @@
 'use client'
 import { useState } from 'react'
 import { api } from '@/lib/api'
+import { getWorkspaceId, storeWorkspaceId } from '@/lib/workspace-store'
 
-const fieldTypes = ['string', 'number', 'boolean', 'date', 'enum', 'longtext', 'relation']
+const fieldTypes = ['string', 'text', 'number', 'boolean', 'date', 'datetime', 'enum', 'relation']
 
 type FieldRow = {
   name: string
-  key: string
-  field_type: string
-  required: boolean
+  slug: string
+  data_type: string
+  is_required: boolean
+  is_unique: boolean
+  options?: string
 }
 
 export default function ModelsPage() {
   const [name, setName] = useState('Tickets')
   const [slug, setSlug] = useState('tickets')
-  const [orgId, setOrgId] = useState(1)
+  const [workspaceId, setWorkspaceId] = useState(() => getWorkspaceId() || 1)
   const [fields, setFields] = useState<FieldRow[]>([
-    { name: 'Title', key: 'title', field_type: 'string', required: true }
+    { name: 'Title', slug: 'title', data_type: 'string', is_required: true, is_unique: false }
   ])
   const [message, setMessage] = useState('')
 
-  const addField = () => setFields([...fields, { name: '', key: '', field_type: 'string', required: false }])
+  const addField = () =>
+    setFields([
+      ...fields,
+      { name: '', slug: '', data_type: 'string', is_required: false, is_unique: false, options: '' }
+    ])
 
   const submit = async () => {
     setMessage('')
     try {
+      const normalizedFields = fields.map((field, index) => ({
+        name: field.name,
+        slug: field.slug,
+        data_type: field.data_type,
+        is_required: field.is_required,
+        is_unique: field.is_unique,
+        position: index,
+        config:
+          field.data_type === 'enum' && field.options
+            ? { options: field.options.split(',').map((opt) => opt.trim()).filter(Boolean) }
+            : undefined
+      }))
+
       const res = await api.post('/models', {
-        organization_id: orgId,
+        workspace_id: workspaceId,
         name,
         slug,
-        fields
+        fields: normalizedFields
       })
       setMessage('Model created: ' + res.data.name)
+      storeWorkspaceId(workspaceId)
     } catch (err) {
       setMessage('Failed to create model')
     }
@@ -57,24 +78,74 @@ export default function ModelsPage() {
         </label>
         <label className="grid gap-1">
           <span>Workspace id</span>
-          <input className="bg-slate-900 p-2 rounded" value={orgId} onChange={(e) => setOrgId(Number(e.target.value))} />
+          <input
+            className="bg-slate-900 p-2 rounded"
+            value={workspaceId}
+            onChange={(e) => setWorkspaceId(Number(e.target.value))}
+          />
         </label>
       </div>
       <div className="space-y-3">
         <p className="text-sm text-slate-400">Fields</p>
         {fields.map((field, idx) => (
-          <div key={idx} className="grid md:grid-cols-4 gap-2 items-center">
-            <input placeholder="Name" className="bg-slate-900 p-2 rounded" value={field.name} onChange={(e) => setFields(fields.map((f,i) => i===idx ? {...f, name: e.target.value} : f))} />
-            <input placeholder="Key" className="bg-slate-900 p-2 rounded" value={field.key} onChange={(e) => setFields(fields.map((f,i) => i===idx ? {...f, key: e.target.value} : f))} />
-            <select className="bg-slate-900 p-2 rounded" value={field.field_type} onChange={(e) => setFields(fields.map((f,i) => i===idx ? {...f, field_type: e.target.value} : f))}>
+          <div key={idx} className="grid md:grid-cols-5 gap-2 items-center">
+            <input
+              placeholder="Name"
+              className="bg-slate-900 p-2 rounded"
+              value={field.name}
+              onChange={(e) =>
+                setFields(fields.map((f, i) => (i === idx ? { ...f, name: e.target.value } : f)))
+              }
+            />
+            <input
+              placeholder="Slug"
+              className="bg-slate-900 p-2 rounded"
+              value={field.slug}
+              onChange={(e) =>
+                setFields(fields.map((f, i) => (i === idx ? { ...f, slug: e.target.value } : f)))
+              }
+            />
+            <select
+              className="bg-slate-900 p-2 rounded"
+              value={field.data_type}
+              onChange={(e) =>
+                setFields(fields.map((f, i) => (i === idx ? { ...f, data_type: e.target.value } : f)))
+              }
+            >
               {fieldTypes.map((type) => (
                 <option key={type} value={type}>{type}</option>
               ))}
             </select>
             <label className="flex gap-2 items-center text-sm text-slate-300">
-              <input type="checkbox" checked={field.required} onChange={(e) => setFields(fields.map((f,i) => i===idx ? {...f, required: e.target.checked} : f))} />
+              <input
+                type="checkbox"
+                checked={field.is_required}
+                onChange={(e) =>
+                  setFields(fields.map((f, i) => (i === idx ? { ...f, is_required: e.target.checked } : f)))
+                }
+              />
               Required
             </label>
+            <label className="flex gap-2 items-center text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={field.is_unique}
+                onChange={(e) =>
+                  setFields(fields.map((f, i) => (i === idx ? { ...f, is_unique: e.target.checked } : f)))
+                }
+              />
+              Unique
+            </label>
+            {field.data_type === 'enum' && (
+              <input
+                placeholder="Options (comma separated)"
+                className="bg-slate-900 p-2 rounded col-span-2 md:col-span-5"
+                value={field.options || ''}
+                onChange={(e) =>
+                  setFields(fields.map((f, i) => (i === idx ? { ...f, options: e.target.value } : f)))
+                }
+              />
+            )}
           </div>
         ))}
         <button onClick={addField} className="border border-slate-800 px-3 py-2 rounded">Add field</button>

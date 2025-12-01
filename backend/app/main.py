@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .core_config import settings
 from .db import engine, Base
-from .routers import auth, organizations, models, records
+from .routers import auth, workspaces, models, records
 
 app = FastAPI(title=settings.app_name, openapi_url=f"{settings.api_prefix}/openapi.json")
 
@@ -16,7 +16,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router, prefix=settings.api_prefix)
-app.include_router(organizations.router, prefix=settings.api_prefix)
+app.include_router(workspaces.router, prefix=settings.api_prefix)
+app.include_router(workspaces.legacy_router, prefix=settings.api_prefix)
 app.include_router(models.router, prefix=settings.api_prefix)
 app.include_router(records.router, prefix=settings.api_prefix)
 

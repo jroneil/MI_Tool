@@ -9,8 +9,12 @@ import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-sto
 interface ModelField {
   id: number
   name: string
-  key: string
-  field_type: string
+  slug: string
+  data_type: string
+  is_required: boolean
+  is_unique: boolean
+  position: number
+  config?: Record<string, any> | null
 }
 
 interface ModelItem {
@@ -24,7 +28,7 @@ interface ModelItem {
 
 export default function ModelsListPage() {
   const searchParams = useSearchParams()
-  const [organizationId, setOrganizationId] = useState<number>(() => getWorkspaceId() || 1)
+  const [workspaceId, setWorkspaceId] = useState<number>(() => getWorkspaceId() || 1)
   const [models, setModels] = useState<ModelItem[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -32,7 +36,7 @@ export default function ModelsListPage() {
 
   const updateWorkspace = (value: number) => {
     const normalized = Number.isFinite(value) && value > 0 ? value : 1
-    setOrganizationId(normalized)
+    setWorkspaceId(normalized)
     storeWorkspaceId(normalized)
   }
 
@@ -45,12 +49,12 @@ export default function ModelsListPage() {
   }, [filter, models])
 
   const fetchModels = async () => {
-    if (!organizationId || organizationId <= 0) return
+    if (!workspaceId || workspaceId <= 0) return
     setLoading(true)
     setError('')
     try {
       const res = await api.get<ModelItem[]>('/models', {
-        params: { organization_id: organizationId }
+        params: { workspace_id: workspaceId }
       })
       setModels(res.data)
     } catch (err) {
@@ -61,8 +65,8 @@ export default function ModelsListPage() {
   }
 
   useEffect(() => {
-    const fromQuery = Number(searchParams.get('org'))
-    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== organizationId) {
+    const fromQuery = Number(searchParams.get('ws') ?? searchParams.get('org'))
+    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== workspaceId) {
       updateWorkspace(fromQuery)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -70,24 +74,24 @@ export default function ModelsListPage() {
 
   useEffect(() => {
     const unsubscribe = subscribe((id) => {
-      if (id && id !== organizationId) {
-        setOrganizationId(id)
+      if (id && id !== workspaceId) {
+        setWorkspaceId(id)
       }
     })
     return typeof unsubscribe === 'function' ? unsubscribe : () => {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId])
+  }, [workspaceId])
 
   useEffect(() => {
-    if (organizationId > 0) {
-      storeWorkspaceId(organizationId)
+    if (workspaceId > 0) {
+      storeWorkspaceId(workspaceId)
     }
-  }, [organizationId])
+  }, [workspaceId])
 
   useEffect(() => {
     fetchModels()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId])
+  }, [workspaceId])
 
   return (
     <div className="space-y-6">
@@ -100,10 +104,10 @@ export default function ModelsListPage() {
         <div className="flex items-center gap-3">
           <input
             type="number"
-            value={organizationId}
+            value={workspaceId}
             onChange={(e) => updateWorkspace(Number(e.target.value))}
             className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
-            placeholder="Org ID"
+            placeholder="Workspace ID"
           />
           <button
             onClick={fetchModels}
@@ -136,7 +140,7 @@ export default function ModelsListPage() {
             {filteredModels.map((model) => (
               <Link
                 key={model.id}
-                href={`/models/${model.slug}/records?org=${organizationId}`}
+                href={`/models/${model.slug}/records?ws=${workspaceId}`}
                 className="border border-slate-800 hover:border-brand-500/60 rounded-xl p-4 transition"
               >
                 <div className="flex items-center justify-between">

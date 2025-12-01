@@ -11,31 +11,34 @@ class Token(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str
+    name: str | None = None
 
 
 class UserRead(BaseModel):
     id: int
     email: EmailStr
+    name: str | None = None
     created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class OrganizationCreate(BaseModel):
+class WorkspaceCreate(BaseModel):
     name: str
 
 
-class OrganizationRead(BaseModel):
+class WorkspaceRead(BaseModel):
     id: int
     name: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-class MembershipRead(BaseModel):
-    organization: OrganizationRead
+class WorkspaceMembershipRead(BaseModel):
+    workspace: WorkspaceRead
     role: str
 
     class Config:
@@ -44,15 +47,17 @@ class MembershipRead(BaseModel):
 
 class FieldCreate(BaseModel):
     name: str
-    key: str
-    field_type: str
-    required: bool = False
-    options: Optional[dict] = None
+    slug: str
+    data_type: str
+    is_required: bool = False
+    is_unique: bool = False
+    position: int = 0
+    config: Optional[dict] = None
 
-    @field_validator("field_type")
+    @field_validator("data_type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"string", "number", "boolean", "date", "enum", "longtext", "relation"}
+        allowed = {"string", "text", "number", "boolean", "date", "datetime", "enum", "relation"}
         if v not in allowed:
             raise ValueError("Unsupported field type")
         return v
@@ -66,7 +71,7 @@ class FieldRead(FieldCreate):
 
 
 class ModelCreate(BaseModel):
-    organization_id: int
+    workspace_id: int
     name: str
     slug: str
     description: Optional[str] = None
@@ -75,6 +80,7 @@ class ModelCreate(BaseModel):
 
 class ModelRead(BaseModel):
     id: int
+    workspace_id: int
     name: str
     slug: str
     description: Optional[str]
@@ -90,6 +96,10 @@ class RecordCreate(BaseModel):
 
 class RecordRead(BaseModel):
     id: int
+    model_id: int
+    workspace_id: int
+    created_by: Optional[int] = None
+    updated_by: Optional[int] = None
     data: dict
     created_at: datetime
     updated_at: datetime
