@@ -7,7 +7,7 @@ from sqlalchemy.sql import Select
 from ..dependencies import get_current_user
 from ..db import get_session
 from ..models import Record, Model, ModelField, WorkspaceMember
-from ..schemas import RecordCreate, RecordRead
+from ..schemas import RecordCreate, RecordRead, RecordListResponse
 from ..core_config import settings
 
 router = APIRouter(tags=["records"])
@@ -195,7 +195,7 @@ async def create_record(
     return record
 
 
-@router.get("/models/{model_id}/records", response_model=list[RecordRead])
+@router.get("/models/{model_id}/records", response_model=RecordListResponse)
 async def list_records(
     model_id: int,
     skip: int = Query(0, ge=0),
@@ -209,13 +209,22 @@ async def list_records(
 ):
     await get_model_with_membership(session, model_id, current_user.id)
 
-    query: Select = select(Record).where(Record.model_id == model_id)
-    query = _apply_filters(query, filter_key, filter_value)
-    query = _apply_sorting(query, sort_by, sort_order)
-    query = query.offset(skip).limit(limit)
+    base_query: Select = select(Record).where(Record.model_id == model_id)
+    filtered_query = _apply_filters(base_query, filter_key, filter_value)
 
-    result = await session.execute(query)
-    return result.scalars().all()
+    count_query = select(func.count()).select_from(Record).where(Record.model_id == model_id)
+    count_query = _apply_filters(count_query, filter_key, filter_value)
+
+    count_result = await session.execute(count_query)
+    total = count_result.scalar_one()
+
+    paginated_query = _apply_sorting(filtered_query, sort_by, sort_order)
+    paginated_query = paginated_query.offset(skip).limit(limit)
+
+    result = await session.execute(paginated_query)
+    items = result.scalars().all()
+
+    return {"items": items, "total": total, "has_more": skip + len(items) < total}
 
 
 @router.get("/records/{record_id}", response_model=RecordRead)

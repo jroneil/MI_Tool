@@ -133,3 +133,9 @@ class RecordRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RecordListResponse(BaseModel):
+    items: list[RecordRead]
+    total: int
+    has_more: bool
