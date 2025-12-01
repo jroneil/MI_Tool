@@ -26,3 +26,15 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/**
+ * Common API response helpers
+ *
+ * - GET /models/:modelId/records returns a paginated object with the queried items,
+ *   the total count for the applied filters, and a has_more flag for pagination.
+ */
+export interface PaginatedRecordsResponse<T> {
+  items: T[]
+  total: number
+  has_more: boolean
+}

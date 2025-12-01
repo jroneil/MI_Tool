@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
-import { api } from '@/lib/api'
+import { api, type PaginatedRecordsResponse } from '@/lib/api'
 import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-store'
 
 interface ModelField {
@@ -193,7 +193,7 @@ export default function RecordsPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.get<RecordRow[]>(`/models/${modelId}/records`, {
+      const res = await api.get<PaginatedRecordsResponse<RecordRow>>(`/models/${modelId}/records`, {
         params: {
           skip: (options?.resetPage ? 0 : page * pageSize),
           limit: pageSize,
@@ -203,9 +203,9 @@ export default function RecordsPage() {
           filter_value: filterValue || undefined
         }
       })
-      setRecords(res.data)
-      setHasMore(res.data.length === pageSize)
-      setUsageEstimate((page * pageSize) + res.data.length)
+      setRecords(res.data.items)
+      setHasMore(res.data.has_more)
+      setUsageEstimate(res.data.total)
     } catch (err) {
       setError('Unable to load records')
     } finally {
