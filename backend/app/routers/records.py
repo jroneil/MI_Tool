@@ -6,17 +6,17 @@ from sqlalchemy import select, func, asc, desc
 from sqlalchemy.sql import Select
 from ..dependencies import get_current_user
 from ..db import get_session
-from ..models import Record, Model, Field, Membership
+from ..models import Record, Model, ModelField, WorkspaceMember
 from ..schemas import RecordCreate, RecordRead
 from ..core_config import settings
 
 router = APIRouter(tags=["records"])
 
 
-async def ensure_membership(session: AsyncSession, user_id: int, organization_id: int):
+async def ensure_membership(session: AsyncSession, user_id: int, workspace_id: int):
     membership = await session.execute(
-        select(Membership).where(
-            Membership.user_id == user_id, Membership.organization_id == organization_id
+        select(WorkspaceMember).where(
+            WorkspaceMember.user_id == user_id, WorkspaceMember.workspace_id == workspace_id
         )
     )
     if not membership.scalars().first():
@@ -31,29 +31,34 @@ def _coerce_date(value: Any) -> date:
     raise ValueError("Invalid date")
 
 
-def _validate_field(field: Field, value: Any) -> str | None:
+def _validate_field(field: ModelField, value: Any) -> str | None:
     if value is None:
         return "Field cannot be null"
 
     try:
-        if field.field_type in {"string", "longtext"}:
+        if field.data_type in {"string", "text"}:
             if not isinstance(value, str):
                 return "Must be a string"
-        elif field.field_type == "number":
+        elif field.data_type == "number":
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 return "Must be a number"
-        elif field.field_type == "boolean":
+        elif field.data_type == "boolean":
             if not isinstance(value, bool):
                 return "Must be a boolean"
-        elif field.field_type == "date":
+        elif field.data_type == "date":
             _coerce_date(value)
-        elif field.field_type == "enum":
+        elif field.data_type == "datetime":
+            if isinstance(value, str):
+                datetime.fromisoformat(value)
+            elif not isinstance(value, datetime):
+                return "Must be a datetime string or object"
+        elif field.data_type == "enum":
             options = []
-            if isinstance(field.options, dict):
-                options = field.options.get("values") or field.options.get("options") or []
+            if isinstance(field.config, dict):
+                options = field.config.get("values") or field.config.get("options") or []
             if value not in options:
                 return "Value not permitted"
-        elif field.field_type == "relation":
+        elif field.data_type == "relation":
             if not isinstance(value, int):
                 return "Must reference related record id"
         else:
@@ -69,16 +74,16 @@ async def validate_record_payload(session: AsyncSession, model: Model, data: dic
     data = data or {}
 
     for field in model.fields:
-        if field.required and field.key not in data:
-            errors.append({"field": field.key, "error": "Field is required"})
+        if field.is_required and field.slug not in data:
+            errors.append({"field": field.slug, "error": "Field is required"})
             continue
 
-        if field.key not in data:
+        if field.slug not in data:
             continue
 
-        error = _validate_field(field, data.get(field.key))
+        error = _validate_field(field, data.get(field.slug))
         if error:
-            errors.append({"field": field.key, "error": error})
+            errors.append({"field": field.slug, "error": error})
 
     if errors:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=errors)
@@ -91,7 +96,7 @@ async def get_model_with_membership(
     model = model_result.scalars().first()
     if not model:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
-    await ensure_membership(session, user_id, model.organization_id)
+    await ensure_membership(session, user_id, model.workspace_id)
     return model
 
 
@@ -127,7 +132,13 @@ async def create_record(
     if total_records >= settings.free_record_limit:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Record limit reached. Upgrade plan")
 
-    record = Record(model_id=model_id, created_by=current_user.id, data=payload.data)
+    record = Record(
+        model_id=model_id,
+        workspace_id=model.workspace_id,
+        created_by=current_user.id,
+        updated_by=current_user.id,
+        data=payload.data,
+    )
     session.add(record)
     await session.commit()
     await session.refresh(record)
@@ -189,6 +200,7 @@ async def update_record(
     await validate_record_payload(session, model, payload.data)
 
     record.data = payload.data
+    record.updated_by = current_user.id
     await session.commit()
     await session.refresh(record)
     return record

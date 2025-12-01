@@ -9,10 +9,11 @@ import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-sto
 interface ModelField {
   id: number
   name: string
-  key: string
-  field_type: string
-  required?: boolean
-  options?: { values?: string[]; options?: string[] }
+  slug: string
+  data_type: string
+  is_required?: boolean
+  is_unique?: boolean
+  config?: { options?: string[]; values?: string[] } | null
 }
 
 interface ModelDefinition {
@@ -32,12 +33,13 @@ interface RecordRow {
 
 const fieldValue = (value: any, field: ModelField) => {
   if (value === undefined || value === null) return '—'
-  if (field.field_type === 'boolean') return value ? 'Yes' : 'No'
-  if (field.field_type === 'date') return new Date(value).toLocaleDateString()
+  if (field.data_type === 'boolean') return value ? 'Yes' : 'No'
+  if (field.data_type === 'date') return new Date(value).toLocaleDateString()
+  if (field.data_type === 'datetime') return new Date(value).toLocaleString()
   return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
-const getOptions = (field: ModelField) => field.options?.values || field.options?.options || []
+const getOptions = (field: ModelField) => field.config?.options || field.config?.values || []
 
 const FieldInput = ({
   field,
@@ -49,7 +51,7 @@ const FieldInput = ({
   onChange: (val: any) => void
 }) => {
   const common = 'bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-full'
-  switch (field.field_type) {
+  switch (field.data_type) {
     case 'boolean':
       return (
         <label className="flex items-center gap-2 text-sm text-slate-200">
@@ -62,7 +64,7 @@ const FieldInput = ({
           {field.name}
         </label>
       )
-    case 'longtext':
+    case 'text':
       return (
         <textarea
           className={`${common} min-h-[120px]`}
@@ -101,6 +103,15 @@ const FieldInput = ({
           onChange={(e) => onChange(e.target.value)}
         />
       )
+    case 'datetime':
+      return (
+        <input
+          type="datetime-local"
+          className={common}
+          value={value ? new Date(value).toISOString().slice(0, 16) : ''}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
     default:
       return (
         <input
@@ -117,8 +128,8 @@ export default function RecordsPage() {
   const params = useParams<{ slug: string }>()
   const searchParams = useSearchParams()
   const slug = params?.slug
-  const [organizationId, setOrganizationId] = useState<number>(() => {
-    const fromQuery = Number(searchParams.get('org'))
+  const [workspaceId, setWorkspaceId] = useState<number>(() => {
+    const fromQuery = Number(searchParams.get('ws') ?? searchParams.get('org'))
     if (Number.isFinite(fromQuery) && fromQuery > 0) return fromQuery
     return getWorkspaceId() || 1
   })
@@ -144,7 +155,7 @@ export default function RecordsPage() {
 
   const updateWorkspace = (value: number) => {
     const normalized = Number.isFinite(value) && value > 0 ? value : 1
-    setOrganizationId(normalized)
+    setWorkspaceId(normalized)
     storeWorkspaceId(normalized)
   }
 
@@ -162,7 +173,7 @@ export default function RecordsPage() {
     setError('')
     try {
       const res = await api.get<ModelDefinition[]>('/models', {
-        params: { organization_id: organizationId }
+        params: { workspace_id: workspaceId }
       })
       const found = res.data.find((m) => m.slug === slug)
       if (!found) {
@@ -205,11 +216,11 @@ export default function RecordsPage() {
   useEffect(() => {
     fetchModel()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, organizationId])
+  }, [slug, workspaceId])
 
   useEffect(() => {
-    const fromQuery = Number(searchParams.get('org'))
-    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== organizationId) {
+    const fromQuery = Number(searchParams.get('ws') ?? searchParams.get('org'))
+    if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== workspaceId) {
       updateWorkspace(fromQuery)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -217,8 +228,8 @@ export default function RecordsPage() {
 
   useEffect(() => {
     const unsubscribe = subscribe((id) => {
-      if (id && id !== organizationId) {
-        setOrganizationId(id)
+      if (id && id !== workspaceId) {
+        setWorkspaceId(id)
       }
     })
     return () => {
@@ -227,7 +238,7 @@ export default function RecordsPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId])
+  }, [workspaceId])
 
   useEffect(() => {
     if (model?.id) {
@@ -280,7 +291,7 @@ export default function RecordsPage() {
     }
   }
 
-  const filterField = model?.fields.find((f) => f.key === filterKey)
+  const filterField = model?.fields.find((f) => f.slug === filterKey)
 
   return (
     <div className="space-y-6">
@@ -291,13 +302,13 @@ export default function RecordsPage() {
           <p className="text-slate-300">Search, filter, and create data directly from your auto-generated model.</p>
         </div>
         <div className="flex items-center gap-3">
-            <input
-              type="number"
-              value={organizationId}
-              onChange={(e) => updateWorkspace(Number(e.target.value))}
-              className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
-              placeholder="Org ID"
-            />
+          <input
+            type="number"
+            value={workspaceId}
+            onChange={(e) => updateWorkspace(Number(e.target.value))}
+            className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
+            placeholder="Workspace ID"
+          />
           <button
             onClick={() => model && fetchRecords(model.id, { resetPage: true })}
             className="bg-brand-500 px-4 py-2 rounded-lg text-white"
@@ -312,7 +323,7 @@ export default function RecordsPage() {
           <div className="space-y-1">
             <p className="text-sm text-slate-400">{model?.fields.length || 0} fields</p>
             <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Link href={`/models/list?org=${organizationId}`} className="underline hover:text-white">Back to models</Link>
+              <Link href={`/models/list?ws=${workspaceId}`} className="underline hover:text-white">Back to models</Link>
               {model?.slug && <span className="bg-slate-900 border border-slate-800 rounded-full px-2 py-1">{model.slug}</span>}
             </div>
           </div>
@@ -331,7 +342,7 @@ export default function RecordsPage() {
               <option value="created_at">Sort by created</option>
               <option value="updated_at">Sort by updated</option>
               {model?.fields.map((field) => (
-                <option key={field.id} value={field.key}>
+                <option key={field.id} value={field.slug}>
                   Sort by {field.name}
                 </option>
               ))}
@@ -356,7 +367,7 @@ export default function RecordsPage() {
             >
               <option value="">Filter field</option>
               {model?.fields.map((field) => (
-                <option key={field.id} value={field.key}>
+                <option key={field.id} value={field.slug}>
                   {field.name}
                 </option>
               ))}
@@ -406,10 +417,10 @@ export default function RecordsPage() {
                   <p className="text-sm text-slate-300">{field.name}</p>
                   <FieldInput
                     field={field}
-                    value={newRecord[field.key]}
-                    onChange={(val) => setNewRecord((prev) => ({ ...prev, [field.key]: val }))}
+                    value={newRecord[field.slug]}
+                    onChange={(val) => setNewRecord((prev) => ({ ...prev, [field.slug]: val }))}
                   />
-                  {field.required && <p className="text-xs text-orange-400">Required</p>}
+                  {field.is_required && <p className="text-xs text-orange-400">Required</p>}
                 </div>
               ))}
             </div>
@@ -441,11 +452,11 @@ export default function RecordsPage() {
                       {editingId === record.id ? (
                         <FieldInput
                           field={field}
-                          value={editingData[field.key]}
-                          onChange={(val) => setEditingData((prev) => ({ ...prev, [field.key]: val }))}
+                          value={editingData[field.slug]}
+                          onChange={(val) => setEditingData((prev) => ({ ...prev, [field.slug]: val }))}
                         />
                       ) : (
-                        <span className="text-slate-200">{fieldValue(record.data[field.key], field)}</span>
+                        <span className="text-slate-200">{fieldValue(record.data[field.slug], field)}</span>
                       )}
                     </td>
                   ))}

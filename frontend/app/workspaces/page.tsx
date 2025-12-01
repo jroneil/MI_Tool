@@ -6,14 +6,14 @@ import { api } from '@/lib/api'
 import { storeWorkspaceId } from '@/lib/workspace-store'
 
 interface Membership {
-  organization: {
+  workspace: {
     id: number
     name: string
   }
   role: string
 }
 
-interface OrganizationRead {
+interface WorkspaceRead {
   id: number
   name: string
 }
@@ -32,7 +32,7 @@ export default function WorkspacesPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.get<Membership[]>('/organizations/me')
+      const res = await api.get<Membership[]>('/workspaces/me')
       setMemberships(res.data)
     } catch (err) {
       setError('Unable to load workspaces')
@@ -45,9 +45,9 @@ export default function WorkspacesPage() {
     fetchMemberships()
   }, [])
 
-  const handleSelectWorkspace = (organizationId: number) => {
-    storeWorkspaceId(organizationId)
-    router.push(`/models/list?org=${organizationId}`)
+  const handleSelectWorkspace = (workspaceId: number) => {
+    storeWorkspaceId(workspaceId)
+    router.push(`/models/list?ws=${workspaceId}`)
   }
 
   const submitNewWorkspace = async (e: React.FormEvent) => {
@@ -56,12 +56,12 @@ export default function WorkspacesPage() {
     setCreateError('')
     setCreating(true)
     try {
-      const res = await api.post<OrganizationRead>('/organizations', { name: workspaceName.trim() })
+      const res = await api.post<WorkspaceRead>('/workspaces', { name: workspaceName.trim() })
       setWorkspaceName('')
       setShowNewWorkspace(false)
       await fetchMemberships()
       storeWorkspaceId(res.data.id)
-      router.push(`/models/list?org=${res.data.id}`)
+      router.push(`/models/list?ws=${res.data.id}`)
     } catch (err) {
       setCreateError('Unable to create workspace')
     } finally {
@@ -90,11 +90,11 @@ export default function WorkspacesPage() {
       <div className="grid md:grid-cols-2 gap-4">
         {memberships.map((membership) => (
           <button
-            key={membership.organization.id}
-            onClick={() => handleSelectWorkspace(membership.organization.id)}
+            key={membership.workspace.id}
+            onClick={() => handleSelectWorkspace(membership.workspace.id)}
             className="border border-slate-800 rounded-xl p-4 hover:border-brand-500 text-left"
           >
-            <p className="text-lg font-semibold">{membership.organization.name}</p>
+            <p className="text-lg font-semibold">{membership.workspace.name}</p>
             <p className="text-sm text-slate-400">Role: {membership.role}</p>
           </button>
         ))}
@@ -112,7 +112,7 @@ export default function WorkspacesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm uppercase text-slate-400">New workspace</p>
-                <h2 className="text-2xl font-semibold">Create organization</h2>
+                <h2 className="text-2xl font-semibold">Create workspace</h2>
               </div>
               <button onClick={() => setShowNewWorkspace(false)} className="text-slate-400 hover:text-white">✕</button>
             </div>
