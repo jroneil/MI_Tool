@@ -162,6 +162,32 @@ async def list_models(
     return models
 
 
+@router.get("/by-slug/{slug}", response_model=ModelRead)
+async def get_model_by_slug(
+    slug: str,
+    workspace_id: int = Query(..., description="Workspace to scope model lookup"),
+    session: AsyncSession = Depends(get_session),
+    current_user=Depends(get_current_user),
+):
+    membership = await session.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.user_id == current_user.id, WorkspaceMember.workspace_id == workspace_id
+        )
+    )
+    if not membership.scalars().first():
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of workspace")
+
+    model_result = await session.execute(
+        select(Model).where(Model.workspace_id == workspace_id, Model.slug == slug)
+    )
+    model = model_result.scalars().first()
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Model not found")
+
+    await session.refresh(model, attribute_names=["fields"])
+    return model
+
+
 @router.get("/{model_id}", response_model=ModelRead)
 async def get_model(
     model_id: int,

@@ -2,9 +2,11 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { useParams, useSearchParams } from 'next/navigation'
+import { AxiosError } from 'axios'
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { api, type PaginatedRecordsResponse } from '@/lib/api'
-import { getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-store'
+import { useAuth } from '@/lib/auth-context'
+import { clearWorkspaceId, getWorkspaceId, storeWorkspaceId, subscribe } from '@/lib/workspace-store'
 
 interface ModelField {
   id: number
@@ -127,12 +129,11 @@ const FieldInput = ({
 export default function RecordsPage() {
   const params = useParams<{ slug: string }>()
   const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const { token } = useAuth()
   const slug = params?.slug
-  const [workspaceId, setWorkspaceId] = useState<number>(() => {
-    const fromQuery = Number(searchParams.get('ws') ?? searchParams.get('org'))
-    if (Number.isFinite(fromQuery) && fromQuery > 0) return fromQuery
-    return getWorkspaceId() || 1
-  })
+  const [workspaceId, setWorkspaceId] = useState<number | null>(() => getWorkspaceId())
 
   const [model, setModel] = useState<ModelDefinition | null>(null)
   const [records, setRecords] = useState<RecordRow[]>([])
@@ -153,10 +154,20 @@ export default function RecordsPage() {
   const [usageEstimate, setUsageEstimate] = useState(0)
   const planLimit = 500
 
-  const updateWorkspace = (value: number) => {
-    const normalized = Number.isFinite(value) && value > 0 ? value : 1
+  const redirectTarget = () => {
+    const base = pathname || '/models'
+    const queryString = searchParams.toString()
+    return queryString ? `${base}?${queryString}` : base
+  }
+
+  const updateWorkspace = (value: number | null) => {
+    const normalized = Number.isFinite(value) && value > 0 ? value : null
     setWorkspaceId(normalized)
-    storeWorkspaceId(normalized)
+    if (normalized) {
+      storeWorkspaceId(normalized)
+    } else {
+      clearWorkspaceId()
+    }
   }
 
   const displayRecords = useMemo(() => {
@@ -169,21 +180,30 @@ export default function RecordsPage() {
   }, [records, search])
 
   const fetchModel = async () => {
-    if (!slug) return
+    if (!slug || !workspaceId || !token) return
     setError('')
     try {
-      const res = await api.get<ModelDefinition[]>('/models', {
+      const res = await api.get<ModelDefinition>(`/models/by-slug/${slug}`, {
         params: { workspace_id: workspaceId }
       })
-      const found = res.data.find((m) => m.slug === slug)
-      if (!found) {
-        setError('Model not found for this workspace')
-        setModel(null)
+      setModel(res.data)
+    } catch (err) {
+      const status = (err as AxiosError)?.response?.status
+      if (status === 401) {
+        setError('Please log in to view this model')
+        router.replace(`/login?next=${encodeURIComponent(redirectTarget())}`)
         return
       }
-      setModel(found)
-    } catch (err) {
-      setError('Unable to load model definition')
+      if (status === 403) {
+        setError('You do not have permission to access this workspace')
+        router.replace('/workspaces')
+        return
+      }
+      if (status === 404) {
+        setError('Model not found for this workspace')
+      } else {
+        setError('Unable to load model definition')
+      }
       setModel(null)
     }
   }
@@ -207,6 +227,17 @@ export default function RecordsPage() {
       setHasMore(res.data.has_more)
       setUsageEstimate(res.data.total)
     } catch (err) {
+      const status = (err as AxiosError)?.response?.status
+      if (status === 401) {
+        setError('Please log in to view records')
+        router.replace(`/login?next=${encodeURIComponent(redirectTarget())}`)
+        return
+      }
+      if (status === 403) {
+        setError('You do not have permission to view these records')
+        router.replace('/workspaces')
+        return
+      }
       setError('Unable to load records')
     } finally {
       setLoading(false)
@@ -214,14 +245,24 @@ export default function RecordsPage() {
   }
 
   useEffect(() => {
+    if (!token) {
+      setError('Please log in to continue')
+      router.replace(`/login?next=${encodeURIComponent(redirectTarget())}`)
+      return
+    }
     fetchModel()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slug, workspaceId])
+  }, [slug, workspaceId, token])
 
   useEffect(() => {
     const fromQuery = Number(searchParams.get('ws') ?? searchParams.get('org'))
     if (Number.isFinite(fromQuery) && fromQuery > 0 && fromQuery !== workspaceId) {
       updateWorkspace(fromQuery)
+      return
+    }
+    if (!workspaceId) {
+      setError('Select a workspace to continue')
+      router.replace('/workspaces')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
@@ -304,7 +345,7 @@ export default function RecordsPage() {
         <div className="flex items-center gap-3">
           <input
             type="number"
-            value={workspaceId}
+            value={workspaceId ?? ''}
             onChange={(e) => updateWorkspace(Number(e.target.value))}
             className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 w-28"
             placeholder="Workspace ID"
