@@ -68,7 +68,42 @@ def _validate_field(field: ModelField, value: Any) -> str | None:
     return None
 
 
-async def validate_record_payload(session: AsyncSession, model: Model, data: dict) -> None:
+async def _validate_relation_record(
+    session: AsyncSession, field: ModelField, value: int, default_workspace_id: int
+) -> str | None:
+    record_result = await session.execute(select(Record).where(Record.id == value))
+    related_record = record_result.scalars().first()
+    if not related_record:
+        return "Related record not found"
+
+    config = field.config if isinstance(field.config, dict) else {}
+    expected_workspace_id = config.get("workspace_id", default_workspace_id)
+    expected_model_id = config.get("model_id")
+
+    if expected_workspace_id and related_record.workspace_id != expected_workspace_id:
+        return "Related record belongs to a different workspace"
+
+    if expected_model_id and related_record.model_id != expected_model_id:
+        return "Related record belongs to a different model"
+
+    return None
+
+
+async def _validate_uniqueness(
+    session: AsyncSession, model: Model, field: ModelField, value: Any, record_id: int | None
+) -> str | None:
+    result = await session.execute(select(Record.id, Record.data).where(Record.model_id == model.id))
+    for existing_id, record_data in result.all():
+        if record_id and existing_id == record_id:
+            continue
+        if isinstance(record_data, dict) and record_data.get(field.slug) == value:
+            return "Value must be unique"
+    return None
+
+
+async def validate_record_payload(
+    session: AsyncSession, model: Model, data: dict, record_id: int | None = None
+) -> None:
     await session.refresh(model, attribute_names=["fields"])
     errors: list[dict[str, str]] = []
     data = data or {}
@@ -81,9 +116,24 @@ async def validate_record_payload(session: AsyncSession, model: Model, data: dic
         if field.slug not in data:
             continue
 
-        error = _validate_field(field, data.get(field.slug))
+        value = data.get(field.slug)
+        error = _validate_field(field, value)
         if error:
             errors.append({"field": field.slug, "error": error})
+            continue
+
+        if field.data_type == "relation":
+            relation_error = await _validate_relation_record(
+                session, field, value, default_workspace_id=model.workspace_id
+            )
+            if relation_error:
+                errors.append({"field": field.slug, "error": relation_error})
+                continue
+
+        if field.is_unique:
+            unique_error = await _validate_uniqueness(session, model, field, value, record_id)
+            if unique_error:
+                errors.append({"field": field.slug, "error": unique_error})
 
     if errors:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=errors)
@@ -180,7 +230,7 @@ async def view_record(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
     model = await get_model_with_membership(session, record.model_id, current_user.id)
-    await validate_record_payload(session, model, record.data)
+    await validate_record_payload(session, model, record.data, record_id=record.id)
     return record
 
 
@@ -197,7 +247,7 @@ async def update_record(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Record not found")
 
     model = await get_model_with_membership(session, record.model_id, current_user.id)
-    await validate_record_payload(session, model, payload.data)
+    await validate_record_payload(session, model, payload.data, record_id=record.id)
 
     record.data = payload.data
     record.updated_by = current_user.id
